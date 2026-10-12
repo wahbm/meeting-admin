@@ -13,8 +13,8 @@
 - 已有：登录/三种角色；基础资料及树形行业；五类会议预约、编辑、筛选、授权配置和主要联动；独立生命周期操作；临时名单与CSV/XLSX导入；文档上传和所有人绑定；会后资料管理、模拟发送、参会统计导出；系列子会议；审计和持久化任务。
 - 本地存储是真实的；媒体、Office转换页图、外部同步和发送是模拟的。统计演示记录由名单生成，每人固定30分钟。
 - 仍有配置联动、资料生成/发送条件和原文交互差距，详见 `TODO.md`；不能描述为原文所有功能已经完成。
-- 本地业务验证：16项领域/SQLite集成测试通过，类型检查及生产构建通过。浏览器验证核心预约、名单新增、状态变化、模拟资料发送和统计；没有覆盖所有页面组合。详见 `acceptance.md`。
-- 本轮部署已获授权创建公开wahbm/meeting-admin并初始化根Git；原始资料、数据库、上传和凭据排除发布。生产迁移到共享MariaDB，本地SQLite保留；已上线且自动部署验证通过，线上地址与维护契约见DEPLOYMENT.md；部署CI对SQLite/MariaDB分别通过18项测试。
+- 当前部署CI：SQLite/MariaDB各18项领域及集成测试通过，类型检查、前后端生产构建通过。浏览器验证核心预约、名单新增、状态变化、模拟资料发送和统计；没有覆盖所有页面组合。详见 `acceptance.md`。
+- 本轮部署已获授权创建公开wahbm/meeting-admin并初始化根Git；原始资料、数据库、上传和凭据排除发布。生产迁移到共享MariaDB，本地SQLite保留；已上线且自动部署验证通过，线上地址与维护契约见DEPLOYMENT.md；运行代码5539323，接手记录提交4ea191e。
 
 ## 技术栈和目录
 
@@ -30,16 +30,20 @@ TypeScript、React 18、Vite 5、Ant Design 5、React Router、TanStack Query；
 | `shared/domain.ts` | 默认值、共享Schema、授权转换、状态机 |
 | `server/app.ts`、`server/tasks.ts` | 接口/权限与模拟执行器 |
 | `server/{db,security,seed,index,openapi}.ts` | 数据库、登录、种子、进程、API契约 |
-| `prisma/`、`scripts/prepare-db.mjs` | 数据模型、两次迁移、首次SQLite文件准备 |
+| `prisma/schema.prisma`、`prisma/migrations/` | SQLite源模型、两次迁移 |
+| `prisma/mysql/`、`scripts/sync-mysql-schema.mjs` | 派生MySQL模型、独立生产迁移 |
+| `shared/public-path.ts` | 公共前缀统一处理 |
+| `server/import-data.ts`、`server/smoke.ts` | 一次性业务迁移、生产登录/API检查 |
+| `scripts/`、`deploy/`、`.github/workflows/` | 初始化、运行包构建、服务器配置和自动部署 |
 | `tests/` | 领域及真实数据库集成测试 |
 | `会议系统整理/` | 原始需求证据，保持不变 |
 
 ## 运行与验证
 
-建议Node 20/22 LTS；上轮使用Node 18.18验证。首次运行：
+建议Node 22（CI与ECS一致），服务编译目标Node 20。首次本地运行：
 
 ```sh
-npm install
+npm ci
 cp .env.example .env  # 仅在.env不存在时执行
 npm run setup
 npm run dev
@@ -54,6 +58,8 @@ npm start             # 构建后，3001同时提供页面和API
 npm run db:generate
 npm run db:migrate
 npm run db:seed
+npm run build:server  # 服务端及种子/迁移导入/smoke入口
+npm run start:production # 需已构建前端/服务端及对应数据库客户端
 ```
 
 首次种子账号：admin/operator/viewer，角色分别为管理员/运营/只读；初始密码来自 `SEED_PASSWORD`（默认示例值见README）。更改环境变量不改变已有密码。默认会话8小时。
@@ -61,3 +67,11 @@ npm run db:seed
 数据库默认 `prisma/meeting.db`；上传默认 `storage/`，可用 `STORAGE_DIR`覆盖。数据库和上传文件须一起备份，均不入版本控制。环境项见 `.env.example`；不要把凭据复制进接手文档。
 
 构建有大包提示；开发富文本存在第三方findDOMNode弃用提示。两者不等于功能测试失败，也不应通过关闭检查掩盖。
+
+## 本轮增量与接手起点
+
+本轮完成部署兼容：公共子路径、Cookie隔离、数据库健康接口、MySQL派生模型和迁移、SQLite业务快照导入、Linux运行包、Actions双数据库验证、systemd/Nginx发布及候选进程清理。部署细节统一查DEPLOYMENT.md，不重复生成服务器或凭据。
+
+Prisma客户端由最后一次generate决定引擎。MariaDB验证只对本机`*_test`库设置MYSQL_DATABASE_URL，再执行`npm run db:generate:mysql`和`TEST_DATABASE_ENGINE=mysql npm test`；本地开发恢复`npm run db:generate`。模型变更同时维护两个引擎的追加迁移，不能仅改派生Schema。
+
+下一步优先处理TODO中的资料生成开关和发送可用性校验，补双数据库测试；部署未补齐这些业务规则。现有main推送会触发生产发布，文档整理与代码上线分开决策。

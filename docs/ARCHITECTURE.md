@@ -4,7 +4,7 @@
 
 ## 分层
 
-浏览器通过同源`/api`调用Fastify；业务Schema位于shared；数据库访问使用Prisma；SQLite保存业务、会话、任务和审计；上传文件存本地目录。
+浏览器通过同源`/api`调用Fastify；业务Schema位于shared；数据库访问使用Prisma；本地SQLite/生产MariaDB保存业务、会话、任务和审计；上传文件存本地目录。
 
 React页面按会议列表/表单、会议详情、基础资料/系列/审计分组。TanStack Query查询缓存与任务轮询；登录退出/会话失效清空缓存。富文本使用Quill编辑、DOMPurify过滤预览。名单CSV解析支持转义和BOM，XLSX使用独立加载的ExcelJS。
 
@@ -58,3 +58,5 @@ MeetingConfig支持类型化校验；反向字段编码仅用于业务数据转�
 生产使用共享MariaDB独立meeting_admin库与最小权限账号，本地SQLite保留。prisma/mysql/schema.prisma由原模型通过scripts/sync-mysql-schema.mjs派生；CI先验证SQLite，再生成MySQL客户端并验证隔离的meeting_admin_test，最后打包Linux生产依赖。禁止在生成MySQL客户端后把测试误指向生产。
 
 PUBLIC_BASE_PATH统一构建资源、前端路由、API、附件、二维码和Cookie路径；服务器内部仍是根路径，Nginx剥离公共前缀并保留Host。生产凭据留在服务器，不放GitHub变量或源码。
+
+生产运行包由CI构建（dist + build-server + Linux生产依赖），ECS仅应用迁移和启动。Nginx代理至systemd单进程；上传位于persistent而非release。候选使用独立transient unit，停止整组后原子切换current，保留一个上一可用版本。代码回滚不回滚数据，迁移必须兼容上一版本；服务器root发布助手的实际安装状态独立于Git提交。具体路径、验收版本和维护命令见DEPLOYMENT.md。
