@@ -1,0 +1,153 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "sqlite"
+  url = env("DATABASE_URL")
+}
+model User {
+  id String @id @default(cuid())
+  username String @unique
+  password String
+  role String
+  sessions Session[]
+}
+model Session {
+  id String @id
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+}
+model Reference {
+  id Int @id @default(autoincrement())
+  kind String
+  name String
+  data String @default("{}")
+  version Int @default(1)
+}
+model Series {
+  id Int @id @default(autoincrement())
+  name String
+  description String @default("")
+  version Int @default(1)
+  meetings Meeting[]
+}
+model Meeting {
+  id Int @id @default(autoincrement())
+  title String
+  startTime DateTime
+  companyCode Int
+  liveType Int
+  status Int @default(1)
+  releaseFlag Int @default(1)
+  isNetSync Int @default(0)
+  confirmed Boolean @default(false)
+  recommended Boolean @default(false)
+  version Int @default(1)
+  data String
+  seriesId Int?
+  series Series? @relation(fields: [seriesId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  people Person[]
+  files Upload[]
+  documents Document[]
+  tasks Task[]
+  materials Material[]
+  deliveries Delivery[]
+  records Attendance[]
+  failures ImportFailure[]
+}
+model Person {
+  id Int @id @default(autoincrement())
+  meetingId Int
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  name String
+  phone String
+  data String
+  version Int @default(1)
+  @@unique([meetingId, phone])
+}
+model ImportFailure {
+  id Int @id @default(autoincrement())
+  meetingId Int
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  data String
+  reason String
+  createdAt DateTime @default(now())
+}
+model Upload {
+  id String @id @default(cuid())
+  meetingId Int?
+  meeting Meeting? @relation(fields: [meetingId], references: [id])
+  kind String
+  filename String
+  path String
+  mime String
+  size Int
+  createdAt DateTime @default(now())
+  documents Document[]
+}
+model Document {
+  id Int @id @default(autoincrement())
+  meetingId Int
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  uploadId String
+  upload Upload @relation(fields: [uploadId], references: [id])
+  ownerPhone String
+  position Int
+}
+model Task {
+  id Int @id @default(autoincrement())
+  meetingId Int
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  kind String
+  status String @default("processing")
+  input String @default("{}")
+  result String @default("{}")
+  simulateFailure Boolean @default(false)
+  attempts Int @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+model Material {
+  id Int @id @default(autoincrement())
+  meetingId Int
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  kind String
+  name String
+  url String @default("")
+  content String @default("")
+  aiValid Boolean @default(false)
+  recordStatus String @default("pending")
+  simulated Boolean @default(true)
+  version Int @default(1)
+}
+model Delivery {
+  id Int @id @default(autoincrement())
+  meetingId Int
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  recipients String
+  contents String
+  status String @default("simulated")
+  createdAt DateTime @default(now())
+}
+model Attendance {
+  id Int @id @default(autoincrement())
+  meetingId Int
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  name String
+  phone String
+  minutes Int
+  source String @default("模拟数据")
+  joinedAt DateTime
+}
+model Audit {
+  id Int @id @default(autoincrement())
+  actor String
+  action String
+  entity String
+  entityId String
+  changes String
+  createdAt DateTime @default(now())
+}

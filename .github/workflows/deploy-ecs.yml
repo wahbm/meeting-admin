@@ -1,0 +1,88 @@
+name: Validate and deploy ECS
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: meeting-admin-${{ github.event_name == 'pull_request' && github.ref || 'production' }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: test-only-root
+          MARIADB_DATABASE: meeting_admin_test
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s --health-timeout=5s --health-retries=30
+    env:
+      MYSQL_DATABASE_URL: mysql://root:test-only-root@127.0.0.1:3306/meeting_admin_test
+      PUBLIC_BASE_PATH: /mosshqq/meeting-admin/
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Validate SQLite
+        run: |
+          PUBLIC_BASE_PATH=/ npm run db:generate
+          PUBLIC_BASE_PATH=/ npm test
+      - name: Validate MariaDB
+        run: |
+          npm run db:generate:mysql
+          PUBLIC_BASE_PATH=/ TEST_DATABASE_ENGINE=mysql npm test
+      - run: npm run build && npm run build:server
+      - name: Build production runtime bundle
+        if: github.event_name != 'pull_request'
+        run: |
+          node scripts/prepare-runtime.mjs
+          cd release-artifact
+          npm install --omit=dev --no-audit --no-fund
+          ./node_modules/.bin/prisma generate --schema prisma/schema.prisma
+          tar -czf ../meeting-admin.tgz .
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: production-runtime
+          path: meeting-admin.tgz
+          retention-days: 3
+  deploy:
+    if: github.event_name != 'pull_request' && vars.ECS_READY == 'true'
+    needs: build
+    runs-on: ubuntu-24.04
+    env:
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+      DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
+      DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+      DEPLOY_KNOWN_HOSTS: ${{ vars.DEPLOY_KNOWN_HOSTS }}
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: production-runtime
+      - name: Deploy verified release
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$DEPLOY_PATH" = /srv/meeting-admin
+          test -n "$SSH_PRIVATE_KEY"
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/meeting-admin-key
+          chmod 600 ~/.ssh/meeting-admin-key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          RELEASE="$DEPLOY_PATH/releases/${GITHUB_SHA}-${GITHUB_RUN_ID}"
+          SSH=(ssh -i ~/.ssh/meeting-admin-key -p "$DEPLOY_PORT" -o StrictHostKeyChecking=yes "$DEPLOY_USER@$DEPLOY_HOST")
+          "${SSH[@]}" "mkdir '$RELEASE'"
+          rsync -az -e "ssh -i $HOME/.ssh/meeting-admin-key -p $DEPLOY_PORT -o StrictHostKeyChecking=yes" meeting-admin.tgz "$DEPLOY_USER@$DEPLOY_HOST:$RELEASE/meeting-admin.tgz"
+          "${SSH[@]}" "tar -xzf '$RELEASE/meeting-admin.tgz' -C '$RELEASE' && rm '$RELEASE/meeting-admin.tgz' && sudo -n /usr/local/sbin/meeting-admin-release '$RELEASE'"
+          curl --fail --retry 10 --retry-delay 2 "https://$DEPLOY_HOST/mosshqq/meeting-admin/api/health"

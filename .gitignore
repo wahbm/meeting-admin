@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+prisma/*.db*
+storage/
+.DS_Store
+build-server/
+release-artifact/
+*.tgz
+会议系统整理/
