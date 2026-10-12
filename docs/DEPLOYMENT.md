@@ -1,49 +1,52 @@
-# 阿里云部署准备
+# 阿里云部署
 
-状态：2026-10-12，部署进行中，尚未通过线上验收。不能将本文件当作线上成功记录。
+状态：2026-10-12，已上线并完成部署验收。业务缺项仍见TODO.md，部署成功不等于原始需求全部完成。
 
-已授权公开仓库wahbm/meeting-admin、组织Secret访问、复用ECS并迁移共享MariaDB；用户不配置定期备份。CLI账号mosshqq；组织网页使用davyluiy完成身份验证及Secret授权，网页已显示Secret updated和9个仓库。组织Variables覆盖公开仓库，目标8.130.116.192:22，部署账号deploy。
+- 地址：https://8.130.116.192/mosshqq/meeting-admin/（现有IP HTTPS，未配置新域名）
+- 仓库：https://github.com/wahbm/meeting-admin，公开；原始资料、凭据、数据库和上传文件不发布。
+- 当前运行代码：553932325f6c45559006ed2f05ed90a68d11640c；成功发布：https://github.com/wahbm/meeting-admin/actions/runs/38269808142。
+- 用户授权复用ECS、组织Secret访问及共享MariaDB迁移；明确不配置定期备份。
 
-计划目录/srv/meeting-admin、服务meeting-admin、端口3109及候选3110、数据库meeting_admin、公网路径/mosshqq/meeting-admin/。Workbench已验证sudo权限、Nginx/MariaDB运行、内存可用约919MiB、磁盘可用26GiB及项目名称无冲突；本地SSH无可用deploy私钥，首次服务器准备使用现有授权Workbench，后续Actions使用组织Secret。
+## 运行契约
 
-现有SQLite通过一致性快照迁移业务记录，原文件保留；账号和登录会话不导出，生产账号使用服务器生成的独立初始密码。本地现有Upload记录为0，因此没有需迁移的关联文件。迁移JSON不进仓库或公开Actions产物。
+Nginx → 127.0.0.1:3109 → systemd单进程meeting-admin（非root账号）→ 共享MariaDB独立meeting_admin库。ECS使用Node22；不新增Docker/Redis，不公开数据库或后台端口。公共前缀在Nginx剥离，保留Host；构建资源、路由、API、附件、二维码及Cookie路径使用同一PUBLIC_BASE_PATH。
 
-## 待确认
+| 路径 | 用途 |
+|---|---|
+| /srv/meeting-admin/releases、current | 不可变运行包、原子切换入口 |
+| /srv/meeting-admin/.known-good | 最近已验证版本，保留当前和一个上一版本 |
+| /srv/meeting-admin/persistent/uploads | 持久上传，独立于代码发布 |
+| /etc/meeting-admin.env | 服务器环境及凭据，root:meeting-admin 0640 |
+| /etc/meeting-admin.initial-admin-password | 初始密码，root 0600；用户自行读取 |
+| /etc/systemd/system/meeting-admin.service | 限制写入目录和内存的应用服务 |
+| /usr/local/sbin/meeting-admin-release | root拥有的发布助手，deploy仅有此命令sudo权限 |
+| /etc/nginx/snippets/meeting-admin.locations.conf | 项目专属路由，保留其他项目配置 |
 
-- 是否新建公开 `wahbm/meeting-admin`、授权使用组织部署Secret，或用户选择其他发布方式。
-- 是否复用现有ECS，目标路由、目录、服务、端口需检查冲突。
-- 服务器新建SQLite、迁移现有本地数据，或迁移MariaDB；不自动更换数据库引擎。
-- 域名/HTTPS及备份偏好；不默认创建定期备份。
+生产账号admin/operator/viewer使用服务器随机初始密码，本地账号和会话未迁移。用户可在已授权Workbench执行 `sudo cat /etc/meeting-admin.initial-admin-password`；不要把结果发送到聊天、仓库或日志。种子重复运行不重置密码。
 
-GitHub在提升权限环境已验证登录mosshqq，组织角色admin；目标仓库不存在。组织部署配置API缺少admin:org scope，需要本地CLI授权刷新或组织网页配置，不在聊天中发送Token/私钥。
+## 数据与发布
 
-## 已准备的兼容能力
+本地SQLite仍保留。生产MYSQL_DATABASE_URL只存服务器；prisma/mysql/schema.prisma由根SQLite模型派生，使用独立MySQL迁移。不得对MariaDB运行SQLite迁移或让测试指向生产库。
 
-- 构建时 `PUBLIC_BASE_PATH` 设置Vite base，前端basename、API、附件和二维码随之变化；默认 `/` 保持本地行为。
-- Nginx须剥离公共前缀再代理给内部根路径服务，并保留Host，满足Origin校验；同时设置适合上传的body大小。
-- 运行时PUBLIC_BASE_PATH须与构建一致，SESSION_COOKIE_NAME使用项目专属名称，Cookie路径限制在公共前缀；HTTPS部署启用COOKIE_SECURE。
-- `/api/health`无需登录，检查数据库，不输出配置；迁移完成后才能通过检查。
-- `npm run build:server`生成Node20入口；`npm run start:production`启动编译后服务；构建完成后使用 `node build-server/seed.js`初始化。
-- NODE_ENV=production时种子要求独立SEED_PASSWORD，拒绝示例密码。凭据只保存在服务器保护的环境文件中。
+一次性一致性快照已迁移业务数据：会议2、基础资料12、人员1、资料3、任务2、发送1、参会1、审计9；关联Upload为0。导入文件保存在服务器persistent/import.json，导入标记为.imported；不重复导入非空业务库。数据库与上传应作为同一恢复集合；本次未配置定期备份。
 
-## 推荐发布模型（未执行）
+main推送或手动Actions运行测试、构建及发布；PR只验证。使用组织DEPLOY_HOST/PORT/USER/KNOWN_HOSTS和选定仓库SSH_PRIVATE_KEY、仓库DEPLOY_PATH/ECS_READY；不复制组织私钥。CI准备Linux生产依赖，服务器只解包、迁移、初始化、候选验证和切换，不安装开发依赖。
 
-Nginx + 单进程systemd，不新增Docker/Redis。CI运行测试、构建并准备Linux生产运行依赖；ECS只解包、应用迁移及启动，不安装开发依赖或编译前端。
+发布助手使用项目锁、候选systemd transient unit（3110）、健康及登录/API检查，成功后更新.known-good。候选整组停止后再切换正式服务；最后验证3110已释放、仅3109监听。失败回到记录的上一可用代码，保留诊断；数据库迁移只能追加兼容变更，代码回滚不回滚数据。未在生产主动注入失败测试回滚。
 
-项目独立releases和current软链接，数据库/上传/环境文件位于独立persistent目录。保留当前与一个已验证版本；切换失败回到已记录的可用版本，数据库迁移只允许兼容旧代码的追加修改。
+root发布助手不由普通CI覆盖。以后修改deploy/release.sh，需通过授权Workbench/sudo审阅安装服务器副本；不能只提交源码就认为服务器助手已更新。
 
-服务仅监听127.0.0.1，应用使用非root账号。实际内存、磁盘增量需结合ECS现状测量，不在检查前承诺容量。
+## 验证及维护
 
-发布产物排除 `.env`、数据库、storage、原始业务资料及Git元数据。迁移现有数据需单独授权并一致地复制数据库和文件，不能复制运行中的SQLite journal代替备份。
+本次SQLite/MariaDB各18项测试、生产构建和部署均通过。线上数据库健康、实际登录/me/会议列表/OpenAPI/退出通过；严格HTTPS首页及深链200，浏览器登录页正常且无脚本错误。Nginx配置验证通过，服务active，候选已清理。验收时内存可用约863MiB、磁盘可用26GiB，服务内存约27MiB（瞬时值）。附件数据源为空，线上未额外写入业务文件；相关权限与绑定由数据库集成测试覆盖。
 
-上线验收：服务与数据库健康、Nginx配置校验、公共页面/深链、登录/API、附件下载、二维码前缀、浏览器错误及资源余量。未通过全部验收不能标记部署成功。
+只读维护命令：
 
-## 当前验证与访问配置
+```sh
+sudo systemctl status meeting-admin --no-pager
+sudo journalctl -u meeting-admin -n 100 --no-pager
+curl --fail https://8.130.116.192/mosshqq/meeting-admin/api/health
+sudo readlink -f /srv/meeting-admin/current
+```
 
-首次验证运行38268341950已通过：SQLite和MariaDB分别18项测试，前后端生产构建与Linux运行包生成成功；首次发布运行38268952964进行中。Nginx公共HTTPS证书已用严格curl验证，未跳过证书检查。
-
-独立凭据位于/etc/meeting-admin.env（root:meeting-admin 0640）；初始管理员密码位于/etc/meeting-admin.initial-admin-password（root 0600）。用户在Workbench自行读取，不把结果发到聊天或仓库。账号admin/operator/viewer均初始化为服务器随机密码，既有本地账号和会话不迁移。
-
-运行时共享MariaDB使用MYSQL_DATABASE_URL；根prisma/schema.prisma仍为SQLite。先测试SQLite再生成MySQL客户端，测试引擎TEST_DATABASE_ENGINE=mysql只允许本机_test数据库。生产使用prisma/mysql的独立初始迁移（包含recordStatus），不在MariaDB执行SQLite迁移。
-
-首次发布38268952964成功，随后资源检查发现旧候选进程清理不完整，已停止该候选并将发布帮助脚本改为systemd transient unit，以停止整个进程组；修复发布仍需验证候选端口释放。root拥有的/usr/local/sbin/meeting-admin-release不由普通部署账号自动覆盖，未来修改此帮助脚本须通过授权Workbench/sudo审阅安装。
+不要输出环境文件或凭据排查问题。后续文档提交不改变上述运行版本；实际版本以current及成功Actions记录为准。

@@ -53,7 +53,7 @@ MeetingConfig支持类型化校验；反向字段编码仅用于业务数据转�
 - 当前两次迁移分别初始化模型和增加Material.recordStatus；已应用迁移保持不变，后续追加迁移。测试在导入db模块前设置临时DATABASE_URL/STORAGE_DIR。
 - 会后发送目前仅校验资料存在，生成任务尚未遵守各开关；这些是TODO，不是设计成允许的完整业务规则。
 
-## 部署扩展（2026-10-12，发布准备）
+## 部署扩展（2026-10-12，已上线）
 
 生产使用共享MariaDB独立meeting_admin库与最小权限账号，本地SQLite保留。prisma/mysql/schema.prisma由原模型通过scripts/sync-mysql-schema.mjs派生；CI先验证SQLite，再生成MySQL客户端并验证隔离的meeting_admin_test，最后打包Linux生产依赖。禁止在生成MySQL客户端后把测试误指向生产。
 
