@@ -4,7 +4,7 @@
 
 ## 通用约定
 
-- 除登录外，全部接口要求`session` Cookie；登录成功通过Set-Cookie返回，会话8小时。
+- 除登录和GET /health外，全部接口要求会话Cookie（默认session，生产可配置专属名称）；登录成功通过Set-Cookie返回，会话8小时。
 - 写操作要求同源Origin；无Origin的受信本地脚本仍必须提供有效Cookie。
 - viewer禁止写入；operator不能修改基础资料；内部审计不向viewer开放。
 - 成功HTTP200直接返回实体、数组或查询结果。错误`{message:string}`：400校验/状态条件、401会话、403权限、404不存在、409重复/引用/版本冲突、422研究所同步确认、413文件大小。
@@ -61,3 +61,5 @@ await api('/meetings/1', 'PATCH', {config, version:1});
 接口不会接收房间RTC/RTM token，也没有生成或分配roomId/channelName的逻辑。文档中的旧GET修改接口没有复制到新项目。
 
 资料录制状态recordStatus：pending待提供、processing处理中、ready模拟可用、failed失败。模拟生成资料保存ready。结束会议仅把已标记ready且包含链接或内容的回放视为可用回放。
+
+GET /api/health为匿名数据库健康检查，成功返回{status:"ok"}，不可用返回HTTP503。子路径部署的Cookie名称、路径和OpenAPI servers由服务器配置，不能混用其他项目Cookie。

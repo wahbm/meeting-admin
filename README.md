@@ -60,3 +60,9 @@ npm start
 本MVP没有外部观看鉴权、真实媒体播放、真实邮件、计费、会员支付或会控。文档未定义的混合授权与回放0天含义仅保存配置，不推断为实际准入策略。所有管理账号管理同一个工作空间，没有多租户隔离。
 
 公开部署需要自行配置 HTTPS、初始密码、备份和反向代理。`.env` 中 `HOST` 默认仅本机，HTTPS部署可设置 `COOKIE_SECURE=true`；代理应保留客户端 Host。
+
+## 阿里云发布
+
+生产采用共享MariaDB独立数据库，本地SQLite保留。部署及首次密码交接见 [部署说明](docs/DEPLOYMENT.md)。源码仓库不包含原始业务资料、凭据、数据库或上传内容。
+
+PUBLIC_BASE_PATH设置构建与运行公共前缀；CI负责双数据库验证及Linux运行包，ECS使用systemd，不安装开发依赖。生产启动使用npm run start:production。本地从MySQL客户端切回SQLite需重新执行npm run db:generate。

@@ -18,20 +18,28 @@ if [[ -f "$ROOT/persistent/import.json" && ! -f "$ROOT/persistent/.imported" ]];
   touch "$ROOT/persistent/.imported"
 fi
 run_app /usr/bin/node build-server/seed.js
-candidate_pid=''
-cleanup() { if [[ -n "$candidate_pid" ]]; then kill "$candidate_pid" 2>/dev/null || true; wait "$candidate_pid" 2>/dev/null || true; fi; }
+candidate_started=false
+cleanup() {
+  if [[ "$candidate_started" == true ]] && [[ "$(systemctl show -p LoadState --value meeting-admin-candidate.service)" == loaded ]]; then
+    systemctl stop meeting-admin-candidate.service
+  fi
+}
 trap cleanup EXIT
-run_app /usr/bin/env PORT=3110 /usr/bin/node build-server/index.js >"$ROOT/persistent/candidate.log" 2>&1 &
-candidate_pid=$!
+systemd-run --quiet --collect --unit=meeting-admin-candidate --uid=meeting-admin --gid=meeting-admin \
+  --property="WorkingDirectory=$RELEASE" --property=EnvironmentFile=/etc/meeting-admin.env \
+  --property=NoNewPrivileges=yes --property=PrivateTmp=yes --property=ProtectHome=yes \
+  --property=ProtectSystem=strict --property="ReadWritePaths=$ROOT/persistent" --property=MemoryMax=256M \
+  /usr/bin/env PORT=3110 /usr/bin/node "$RELEASE/build-server/index.js"
+candidate_started=true
 healthy=false
 for _ in $(seq 1 30); do
   if curl -fsS http://127.0.0.1:3110/api/health >/dev/null; then healthy=true; break; fi
-  kill -0 "$candidate_pid" 2>/dev/null || break
+  systemctl is-active --quiet meeting-admin-candidate.service || break
   sleep 1
 done
-[[ "$healthy" == true ]] || { echo 'Candidate failed; see candidate.log' >&2; exit 1; }
+[[ "$healthy" == true ]] || { echo 'Candidate failed; inspect journalctl -u meeting-admin-candidate' >&2; exit 1; }
 cleanup
-candidate_pid=''
+candidate_started=false
 ln -s "$RELEASE" "$ROOT/.current-next"
 mv -Tf "$ROOT/.current-next" "$ROOT/current"
 systemctl restart meeting-admin.service

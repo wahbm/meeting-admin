@@ -31,6 +31,10 @@ jobs:
         with:
           node-version: "22"
           cache: npm
+      - name: Validate deployment scripts
+        run: |
+          bash -n deploy/release.sh
+          python3 -c "import ast,pathlib; ast.parse(pathlib.Path('deploy/bootstrap.py').read_text())"
       - run: npm ci
       - name: Validate SQLite
         run: |

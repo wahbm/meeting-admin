@@ -37,3 +37,13 @@ Nginx + 单进程systemd，不新增Docker/Redis。CI运行测试、构建并准
 发布产物排除 `.env`、数据库、storage、原始业务资料及Git元数据。迁移现有数据需单独授权并一致地复制数据库和文件，不能复制运行中的SQLite journal代替备份。
 
 上线验收：服务与数据库健康、Nginx配置校验、公共页面/深链、登录/API、附件下载、二维码前缀、浏览器错误及资源余量。未通过全部验收不能标记部署成功。
+
+## 当前验证与访问配置
+
+首次验证运行38268341950已通过：SQLite和MariaDB分别18项测试，前后端生产构建与Linux运行包生成成功；首次发布运行38268952964进行中。Nginx公共HTTPS证书已用严格curl验证，未跳过证书检查。
+
+独立凭据位于/etc/meeting-admin.env（root:meeting-admin 0640）；初始管理员密码位于/etc/meeting-admin.initial-admin-password（root 0600）。用户在Workbench自行读取，不把结果发到聊天或仓库。账号admin/operator/viewer均初始化为服务器随机密码，既有本地账号和会话不迁移。
+
+运行时共享MariaDB使用MYSQL_DATABASE_URL；根prisma/schema.prisma仍为SQLite。先测试SQLite再生成MySQL客户端，测试引擎TEST_DATABASE_ENGINE=mysql只允许本机_test数据库。生产使用prisma/mysql的独立初始迁移（包含recordStatus），不在MariaDB执行SQLite迁移。
+
+首次发布38268952964成功，随后资源检查发现旧候选进程清理不完整，已停止该候选并将发布帮助脚本改为systemd transient unit，以停止整个进程组；修复发布仍需验证候选端口释放。root拥有的/usr/local/sbin/meeting-admin-release不由普通部署账号自动覆盖，未来修改此帮助脚本须通过授权Workbench/sudo审阅安装。
