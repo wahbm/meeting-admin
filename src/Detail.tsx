@@ -41,6 +41,7 @@ export function MeetingDetail() {
   const q = useQuery({
     queryKey: ["meeting", id],
     queryFn: () => api("/meetings/" + id),
+    refetchInterval: 3000,
   });
   const user = useUser(),
     qc = useQueryClient();
@@ -78,9 +79,13 @@ export function MeetingDetail() {
           </p>
         </div>
         <Space>
-          <Link to={`/simulation/${id}?kind=control`}>
-            <Button>会控（模拟）</Button>
-          </Link>
+          <a
+            href={publicUrl(`/client/meetings/${id}`)}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <Button>测试会议客户端</Button>
+          </a>
           <Link to={`/?id=${id}`}>
             <Button>列表定位</Button>
           </Link>
@@ -259,8 +264,8 @@ function Invitation({ id }: { id: string }) {
       <Alert
         showIcon
         type="info"
-        message="模拟邀请信息"
-        description="所有入口、电话和口令仅用于后台演示，不对应真实房间或第三方服务。"
+        message="测试会议客户端入口"
+        description="网络参会、参会二维码和会控组织者链接可打开测试客户端，权限由登录手机号决定。音视频、电话、口令、监控、报名和速记仍为模拟。"
         style={{ marginBottom: 16 }}
       />
       <div className="invitation-grid">
@@ -278,9 +283,12 @@ function Invitation({ id }: { id: string }) {
                 onClick={() =>
                   navigator.clipboard
                     .writeText(
-                      "[模拟信息]\n" +
+                      "[测试会议邀请；音视频及其他外部能力为模拟]\n" +
                         Object.entries(q.data[key])
-                          .map(([k, v]) => `${k}：${v}`)
+                          .map(
+                            ([k, v]) =>
+                              `${k}：${String(v).startsWith("/client/") ? location.origin + publicUrl(String(v)) : v}`,
+                          )
                           .join("\n"),
                     )
                     .then(() => message.success("已复制"))
@@ -298,7 +306,15 @@ function Invitation({ id }: { id: string }) {
               items={Object.entries(q.data[key]).map(([k, v]) => ({
                 key: k,
                 label: k,
-                children: String(v).startsWith("/simulation/") ? (
+                children: String(v).startsWith("/client/") ? (
+                  <a
+                    href={publicUrl(String(v))}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {location.origin + publicUrl(String(v))}
+                  </a>
+                ) : String(v).startsWith("/simulation/") ? (
                   <Link to={String(v)}>查看模拟入口</Link>
                 ) : (
                   String(v)
@@ -311,7 +327,12 @@ function Invitation({ id }: { id: string }) {
                   .filter((k) => q.data.join[k])
                   .map((k) => (
                     <div key={k}>
-                      <Typography.Paragraph>{k}（模拟）</Typography.Paragraph>
+                      <Typography.Paragraph>
+                        {k}
+                        {String(q.data.join[k]).startsWith("/client/")
+                          ? "（测试客户端）"
+                          : "（模拟）"}
+                      </Typography.Paragraph>
                       <QRCodeLink
                         value={location.origin + publicUrl(q.data.join[k])}
                       />
@@ -590,7 +611,14 @@ function People({ id }: { id: string }) {
                   邮箱: p.email,
                   销售: p.sales,
                   是否外呼: p.iscall,
-                  身份: p.role,
+                  身份:
+                    (
+                      {
+                        host: "主持人",
+                        guest: "嘉宾",
+                        audience: "观众",
+                      } as Record<string, string>
+                    )[p.role] || "",
                   回放天数: p.replayDays,
                 })),
               )
@@ -1303,12 +1331,16 @@ function Materials({ id, meeting }: { id: string; meeting: any }) {
   );
 }
 function Attendance({ id }: { id: string }) {
+  const [source, setSource] = useState("client");
+  const [round, setRound] = useState<number | undefined>();
   const [search, setSearch] = useState(""),
     [simulateFailure, setSimulateFailure] = useState(false);
   const q = useQuery({
-    queryKey: ["attendance", id, search],
+    queryKey: ["attendance", id, search, source, round],
     queryFn: () =>
-      api(`/meetings/${id}/attendance?search=${encodeURIComponent(search)}`),
+      api(
+        `/meetings/${id}/attendance?search=${encodeURIComponent(search)}&source=${source}${round ? `&round=${round}` : ""}`,
+      ),
     refetchInterval: 5000,
   });
   const readonly = useUser().role === "viewer";
@@ -1323,6 +1355,16 @@ function Attendance({ id }: { id: string }) {
               downloadCSV(
                 "参会记录.csv",
                 (q.data?.rows || []).map((p: any) => ({
+                  轮次: p.round,
+                  身份:
+                    (
+                      {
+                        host: "主持人",
+                        guest: "嘉宾",
+                        audience: "观众",
+                      } as Record<string, string>
+                    )[p.role] || "",
+                  退出时间: p.leftAt ? stamp(p.leftAt) : "",
                   姓名: p.name,
                   电话: p.phone,
                   时长分钟: p.minutes,
@@ -1334,7 +1376,7 @@ function Attendance({ id }: { id: string }) {
           >
             导出
           </Button>
-          {!readonly && (
+          {!readonly && source === "simulated" && (
             <>
               <Checkbox
                 checked={simulateFailure}
@@ -1361,9 +1403,33 @@ function Attendance({ id }: { id: string }) {
     >
       <Alert
         type="info"
-        message="仅统计数据库记录；模拟刷新根据本场名单添加演示记录，不表示真实参会。"
+        message="客户端记录反映测试页面加入/退出操作，不表示真实音视频参会。演示数据单独查看。"
       />
       <Space style={{ margin: "20px 0" }}>
+        <Select
+          value={source}
+          onChange={(v) => {
+            setSource(v);
+            setRound(undefined);
+          }}
+          options={[
+            { value: "client", label: "测试客户端参会" },
+            { value: "simulated", label: "模拟演示数据" },
+          ]}
+        />
+        {source === "client" && (
+          <Select
+            style={{ width: 160 }}
+            allowClear
+            placeholder="最新轮次"
+            value={round}
+            onChange={setRound}
+            options={(q.data?.rounds || []).map((r: any) => ({
+              value: r.number,
+              label: `第 ${r.number} 轮`,
+            }))}
+          />
+        )}
         <Tag color="blue">记录数 {q.data?.stats.count || 0}</Tag>
         <Tag>总时长 {q.data?.stats.totalMinutes || 0} 分钟</Tag>
         <Input.Search placeholder="姓名 / 电话" onSearch={setSearch} />
@@ -1374,7 +1440,24 @@ function Attendance({ id }: { id: string }) {
         columns={[
           { title: "姓名", dataIndex: "name" },
           { title: "电话", dataIndex: "phone" },
+          { title: "轮次", dataIndex: "round" },
+          {
+            title: "身份",
+            dataIndex: "role",
+            render: (v: string) =>
+              (
+                ({ host: "主持人", guest: "嘉宾", audience: "观众" }) as Record<
+                  string,
+                  string
+                >
+              )[v] || "—",
+          },
           { title: "入会时间", dataIndex: "joinedAt", render: stamp },
+          {
+            title: "退出时间",
+            dataIndex: "leftAt",
+            render: (v: any) => (v ? stamp(v) : "—"),
+          },
           { title: "时长（分钟）", dataIndex: "minutes" },
           { title: "来源", dataIndex: "source", render: (v) => <Tag>{v}</Tag> },
         ]}

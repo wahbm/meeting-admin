@@ -1,3 +1,4 @@
+import { encodeCSV } from "../shared/csv";
 import { withBasePath } from "../shared/public-path";
 
 export const publicUrl = (path: string) =>
@@ -22,7 +23,13 @@ export async function api(url: string, method = "GET", body?: unknown) {
       status: response.status,
     });
     if (response.status === 401 && url !== "/auth/login")
-      window.dispatchEvent(new Event("session-expired"));
+      window.dispatchEvent(
+        new Event(
+          url.startsWith("/client/")
+            ? "client-session-expired"
+            : "session-expired",
+        ),
+      );
     throw e;
   }
   return data;
@@ -37,21 +44,7 @@ export async function upload(file: File, kind: string, meetingId?: number) {
   );
 }
 export function downloadCSV(name: string, rows: any[]) {
-  const keys = Object.keys(rows[0] || {});
-  const cell = (v: any) =>
-    `"${String(v ?? "")
-      .replace(/^[=+@-]/, "'$&")
-      .replaceAll('"', '""')}"`;
-  const blob = new Blob(
-    [
-      "\ufeff" +
-        [
-          keys.map(cell).join(","),
-          ...rows.map((r) => keys.map((k) => cell(r[k])).join(",")),
-        ].join("\r\n"),
-    ],
-    { type: "text/csv;charset=utf-8" },
-  );
+  const blob = new Blob([encodeCSV(rows)], { type: "text/csv;charset=utf-8" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = name;

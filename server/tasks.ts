@@ -1,9 +1,11 @@
+import { sweepClientMeetings } from "./client";
 import { db } from "./db";
 let busy = false;
 export async function tick() {
   if (busy) return;
   busy = true;
   try {
+    await sweepClientMeetings();
     const tasks = await db.task.findMany({
       where: {
         status: "processing",

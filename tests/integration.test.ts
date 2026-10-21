@@ -443,7 +443,9 @@ test("持久化模拟任务、会后资料、模拟发送、统计和重复刷�
     (await request(`/meetings/${meetingId}/materials`)).json().length,
     3,
   );
-  const before = (await request(`/meetings/${meetingId}/attendance`)).json();
+  const before = (
+    await request(`/meetings/${meetingId}/attendance?source=simulated`)
+  ).json();
   assert.equal(before.stats.count, 1);
   assert.equal(before.rows[0].source, "模拟数据");
   const t = (
@@ -457,7 +459,8 @@ test("持久化模拟任务、会后资料、模拟发送、统计和重复刷�
   });
   await tick();
   assert.equal(
-    (await request(`/meetings/${meetingId}/attendance`)).json().stats.count,
+    (await request(`/meetings/${meetingId}/attendance?source=simulated`)).json()
+      .stats.count,
     1,
   );
   assert.equal(
@@ -625,4 +628,344 @@ test("部署Cookie名称与路径一致，退出清除相同Cookie", async () =>
     if (previousName === undefined) delete process.env.SESSION_COOKIE_NAME;
     else process.env.SESSION_COOKIE_NAME = previousName;
   }
+});
+
+async function clientLogin(phone: string) {
+  const result = await request(
+    "/client/auth/login",
+    "POST",
+    { phone, code: "1234" },
+    "",
+  );
+  assert.equal(result.statusCode, 200, result.body);
+  return result.headers["set-cookie"].split(";")[0];
+}
+async function newClientMeeting(extra: any = {}) {
+  const result = await request("/meetings", "POST", {
+    config: {
+      ...base,
+      title: `客户端测试${Date.now()}`,
+      guests: [{ name: "嘉宾", phone: "13800000002", position: "" }],
+      ...extra,
+    },
+  });
+  assert.equal(result.statusCode, 200, result.body);
+  return result.json();
+}
+async function clientAction(
+  id: number,
+  auth: string,
+  action: string,
+  extra: any = {},
+) {
+  return request(
+    `/client/meetings/${id}/action`,
+    "POST",
+    { action, ...extra },
+    auth,
+  );
+}
+test("客户端登录隔离、固定验证码、同源保护、准入与真实邀请地址", async () => {
+  assert.equal(
+    (
+      await request(
+        "/client/auth/login",
+        "POST",
+        { phone: "13800000001", code: "0000" },
+        "",
+      )
+    ).statusCode,
+    401,
+  );
+  const host = await clientLogin("13800000001"),
+    other = await clientLogin("13800000009");
+  assert.equal(
+    (await request("/meetings", "GET", undefined, host)).statusCode,
+    401,
+  );
+  assert.equal(
+    (await request("/client/auth/me", "GET", undefined, cookie)).statusCode,
+    401,
+  );
+  const cross = await app.inject({
+    url: "/api/client/auth/login",
+    method: "POST",
+    headers: { origin: "https://evil.invalid" },
+    payload: { phone: "13800000001", code: "1234" },
+  });
+  assert.equal(cross.statusCode, 403);
+  const m = await newClientMeeting();
+  assert.equal(
+    (await request(`/client/meetings/${m.id}`, "GET", undefined, other))
+      .statusCode,
+    403,
+  );
+  assert.equal((await clientAction(m.id, host, "join")).statusCode, 400);
+  const invite = (await request(`/meetings/${m.id}/invitation`)).json();
+  assert.equal(invite.join.网络参会, `/client/meetings/${m.id}`);
+  assert.equal(invite.join.二维码内容, invite.control.组织者链接);
+  const before = (
+    await request(`/client/meetings/${m.id}`, "GET", undefined, host)
+  ).json();
+  assert.equal(before.startedAt, null);
+  assert.equal(before.me.role, "host");
+  const both = host + "; " + cookie;
+  assert.equal(
+    (await request("/client/auth/logout", "POST", {}, both)).statusCode,
+    200,
+  );
+  assert.equal(
+    (await request("/auth/me", "GET", undefined, both)).statusCode,
+    200,
+  );
+  assert.equal(
+    (await request("/client/auth/me", "GET", undefined, both)).statusCode,
+    401,
+  );
+});
+test("客户端角色、重复加入、禁言持久化、结束结算及轮次隔离", async () => {
+  const host = await clientLogin("13800000001"),
+    guest = await clientLogin("13800000002"),
+    audience = await clientLogin("13800000003");
+  const m = await newClientMeeting({ allowAnyParticipant: true });
+  assert.equal(
+    (await clientAction(m.id, guest, "start", { version: m.version }))
+      .statusCode,
+    403,
+  );
+  const start = await clientAction(m.id, host, "start", { version: m.version });
+  assert.equal(start.statusCode, 200, start.body);
+  assert.ok(start.json().startedAt);
+  assert.equal(start.json().me.joined, false);
+  assert.equal(
+    (await clientAction(m.id, host, "start", { version: m.version }))
+      .statusCode,
+    409,
+  );
+  const lobby = (
+    await request(`/client/meetings/${m.id}`, "GET", undefined, audience)
+  ).json();
+  assert.equal(lobby.capabilities.participants, false);
+  await clientAction(m.id, audience, "join");
+  assert.equal((await clientAction(m.id, audience, "speak")).statusCode, 403);
+  await clientAction(m.id, guest, "join");
+  await clientAction(m.id, guest, "join");
+  const round = await db.meetingRound.findFirst({ where: { meetingId: m.id } });
+  assert.equal(
+    await db.clientVisit.count({
+      where: { roundId: round.id, phone: "13800000002" },
+    }),
+    1,
+  );
+  assert.equal(
+    (await clientAction(m.id, guest, "speak")).json().me.speaking,
+    true,
+  );
+  const seat = await db.clientSeat.findFirst({
+    where: { roundId: round.id, phone: "13800000002" },
+  });
+  assert.equal(
+    (await clientAction(m.id, host, "mute", { targetId: seat.id })).statusCode,
+    200,
+  );
+  assert.equal((await clientAction(m.id, guest, "speak")).statusCode, 403);
+  await clientAction(m.id, guest, "leave");
+  await clientAction(m.id, guest, "join");
+  assert.equal(
+    (await request(`/client/meetings/${m.id}`, "GET", undefined, guest)).json()
+      .me.muted,
+    true,
+  );
+  await clientAction(m.id, host, "unmute", { targetId: seat.id });
+  assert.equal((await clientAction(m.id, guest, "speak")).statusCode, 200);
+  const end = await clientAction(m.id, host, "end", {
+    version: start.json().version,
+  });
+  assert.equal(end.statusCode, 200, end.body);
+  assert.equal(end.json().status, 4);
+  assert.ok(end.json().endedAt);
+  assert.equal(
+    await db.clientVisit.count({ where: { roundId: round.id, leftAt: null } }),
+    0,
+  );
+  const exportResult = await request(
+    `/client/meetings/${m.id}/attendance`,
+    "GET",
+    undefined,
+    host,
+  );
+  assert.equal(exportResult.json().rows.length, 2);
+  assert.equal(
+    (
+      await request(
+        `/client/meetings/${m.id}/attendance`,
+        "GET",
+        undefined,
+        guest,
+      )
+    ).statusCode,
+    403,
+  );
+  const activate = await request(`/meetings/${m.id}/action`, "POST", {
+    action: "activate",
+    version: end.json().version,
+    newStartTime: new Date(Date.now() + 3600000).toISOString(),
+  });
+  assert.equal(activate.statusCode, 200, activate.body);
+  const restart = await request(`/meetings/${m.id}/action`, "POST", {
+    action: "start",
+    version: activate.json().version,
+  });
+  assert.equal(restart.statusCode, 200, restart.body);
+  const rejoin = await clientAction(m.id, guest, "join");
+  assert.equal(rejoin.json().round, 2);
+  assert.equal(rejoin.json().me.muted, false);
+  const adminEnd = await request(`/meetings/${m.id}/action`, "POST", {
+    action: "end",
+    version: restart.json().version,
+  });
+  assert.equal(adminEnd.statusCode, 200, adminEnd.body);
+  assert.equal(
+    await db.clientVisit.count({
+      where: { round: { meetingId: m.id }, leftAt: null },
+    }),
+    0,
+  );
+  const old = (await request(`/meetings/${m.id}/attendance?round=1`)).json();
+  assert.equal(old.rows.length, 2);
+  assert.equal(old.rounds.length, 2);
+  assert.equal(
+    (await request(`/meetings/${m.id}/attendance`)).json().rows.length,
+    1,
+  );
+});
+test("客户端超时、权限撤销、嘉宾降级及历史会议未知时间", async () => {
+  const host = await clientLogin("13800000001"),
+    guest = await clientLogin("13800000002");
+  const m = await newClientMeeting();
+  // Historical live state has no trustworthy start timestamp.
+  await db.meeting.update({ where: { id: m.id }, data: { status: 2 } });
+  const first = (
+    await request(`/client/meetings/${m.id}`, "GET", undefined, host)
+  ).json();
+  assert.equal(first.startedAt, null);
+  await clientAction(m.id, guest, "join");
+  const seat = await db.clientSeat.findFirst({
+    where: { round: { meetingId: m.id }, phone: "13800000002" },
+  });
+  const lastHeartbeat = new Date(Date.now() - 61000);
+  await db.clientVisit.updateMany({
+    where: { roundId: seat.roundId },
+    data: { joinedAt: new Date(Date.now() - 120000) },
+  });
+  await db.clientSeat.update({
+    where: { id: seat.id },
+    data: { lastHeartbeat },
+  });
+  const expired = await clientAction(m.id, guest, "heartbeat");
+  assert.equal(expired.statusCode, 409);
+  assert.equal(
+    (
+      await db.clientVisit.findFirst({ where: { roundId: seat.roundId } })
+    ).leftAt.toISOString(),
+    lastHeartbeat.toISOString(),
+  );
+  await clientAction(m.id, guest, "join");
+  await clientAction(m.id, guest, "speak");
+  const raw = await db.meeting.findUnique({ where: { id: m.id } });
+  const c = JSON.parse(raw.data);
+  c.guests = [];
+  c.allowAnyParticipant = true;
+  await db.meeting.update({
+    where: { id: m.id },
+    data: { data: JSON.stringify(c) },
+  });
+  const downgraded = (
+    await request(`/client/meetings/${m.id}`, "GET", undefined, guest)
+  ).json();
+  assert.equal(downgraded.me.role, "audience");
+  assert.equal(downgraded.me.speaking, false);
+  c.allowAnyParticipant = false;
+  await db.meeting.update({
+    where: { id: m.id },
+    data: { data: JSON.stringify(c) },
+  });
+  assert.equal(
+    (await request(`/client/meetings/${m.id}`, "GET", undefined, guest))
+      .statusCode,
+    403,
+  );
+  assert.equal(
+    (await db.clientSeat.findUnique({ where: { id: seat.id } })).joined,
+    false,
+  );
+  const end = await clientAction(m.id, host, "end", { version: first.version });
+  assert.equal(end.json().durationMinutes, null);
+});
+
+test("客户端身份重叠与名单嘉宾、并发操作、取消和会话过期", async () => {
+  const host = await clientLogin("13800000001"),
+    listGuest = await clientLogin("13800000004");
+  const m = await newClientMeeting({
+    guests: [{ name: "重复身份", phone: "13800000001", position: "" }],
+  });
+  const person = await request(`/meetings/${m.id}/people`, "POST", {
+    name: "名单嘉宾",
+    phone: "13800000004",
+    role: 1,
+  });
+  assert.equal(person.statusCode, 200, person.body);
+  assert.equal(
+    (await request(`/client/meetings/${m.id}`, "GET", undefined, host)).json()
+      .me.role,
+    "host",
+  );
+  assert.equal(
+    (
+      await request(`/client/meetings/${m.id}`, "GET", undefined, listGuest)
+    ).json().me.role,
+    "guest",
+  );
+  const starts = await Promise.all([
+    clientAction(m.id, host, "start", { version: m.version }),
+    clientAction(m.id, host, "start", { version: m.version }),
+  ]);
+  assert.deepEqual(starts.map((r) => r.statusCode).sort(), [200, 409]);
+  const joins = await Promise.all([
+    clientAction(m.id, listGuest, "join"),
+    clientAction(m.id, listGuest, "join"),
+  ]);
+  assert.ok(
+    joins.every((r) => r.statusCode === 200),
+    joins.map((r) => r.body).join("\n"),
+  );
+  const round = await db.meetingRound.findFirst({ where: { meetingId: m.id } });
+  assert.equal(await db.clientVisit.count({ where: { roundId: round.id } }), 1);
+  const foreign = await newClientMeeting();
+  await clientAction(foreign.id, host, "start", { version: foreign.version });
+  const seat = await db.clientSeat.findFirst({ where: { roundId: round.id } });
+  assert.equal(
+    (await clientAction(foreign.id, host, "mute", { targetId: seat.id }))
+      .statusCode,
+    400,
+  );
+  const cancel = await newClientMeeting();
+  await request(`/meetings/${cancel.id}/action`, "POST", {
+    action: "cancel",
+    version: cancel.version,
+  });
+  const cancelled = (
+    await request(`/client/meetings/${cancel.id}`, "GET", undefined, host)
+  ).json();
+  assert.equal(cancelled.status, -1);
+  assert.equal(cancelled.capabilities.start, false);
+  assert.equal((await clientAction(cancel.id, host, "join")).statusCode, 400);
+  await db.clientSession.updateMany({
+    where: { id: listGuest.split("=")[1] },
+    data: { expiresAt: new Date(0) },
+  });
+  assert.equal(
+    (await request("/client/auth/me", "GET", undefined, listGuest)).statusCode,
+    401,
+  );
 });

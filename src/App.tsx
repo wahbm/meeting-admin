@@ -1,3 +1,4 @@
+import Client from "./Client";
 import React, { useState, useEffect, createContext, useContext } from "react";
 import {
   Layout,
@@ -29,6 +30,15 @@ import { References, SeriesPage, AuditPage } from "./Settings";
 export const UserContext = createContext<any>(null);
 export const useUser = () => useContext(UserContext);
 export default function App() {
+  const location = useLocation();
+  return location.pathname === "/client" ||
+    location.pathname.startsWith("/client/") ? (
+    <Client />
+  ) : (
+    <AdminApp />
+  );
+}
+function AdminApp() {
   const [user, setUser] = useState<any>(null),
     [ready, setReady] = useState(false);
   const nav = useNavigate(),

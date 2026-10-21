@@ -1,6 +1,6 @@
 # 架构与阶段结果
 
-更新：2026-10-12。接手状态见 `PROJECT_CONTEXT.md`，未完成项见 `TODO.md`；下表表示模块已有实现，不代表所有原文细节完成。本文件由原 `architecture.md` 保留内容并统一命名。
+更新：2026-10-21。接手状态见 `PROJECT_CONTEXT.md`，未完成项见 `TODO.md`；下表表示模块已有实现，不代表所有原文细节完成。本文件由原 `architecture.md` 保留内容并统一命名。
 
 ## 分层
 
@@ -50,7 +50,7 @@ MeetingConfig支持类型化校验；反向字段编码仅用于业务数据转�
 - 后端检查Cookie会话、角色和Origin/Host；Vite代理保持 `changeOrigin:false`，避免同源写入失败。viewer只读，operator不能维护基础资料，所有账号共用单一空间。
 - 上传与绑定分离；文件kind/会议归属、文档转换完成、所有人手机号和会议version都需校验。富文本预览必须经DOMPurify，不直接渲染不可信HTML。
 - 执行器每秒检查，约2.5秒后处理；前端任务5秒轮询。finished/ready及Delivery模拟状态不能当作真实服务成功。
-- 当前两次迁移分别初始化模型和增加Material.recordStatus；已应用迁移保持不变，后续追加迁移。测试在导入db模块前设置临时DATABASE_URL/STORAGE_DIR。
+- 当前三次迁移分别初始化模型、增加Material.recordStatus、增加测试客户端模型；已应用迁移保持不变，后续追加迁移。测试在导入db模块前设置临时DATABASE_URL/STORAGE_DIR。
 - 会后发送目前仅校验资料存在，生成任务尚未遵守各开关；这些是TODO，不是设计成允许的完整业务规则。
 
 ## 部署扩展（2026-10-12，已上线）
@@ -60,3 +60,11 @@ MeetingConfig支持类型化校验；反向字段编码仅用于业务数据转�
 PUBLIC_BASE_PATH统一构建资源、前端路由、API、附件、二维码和Cookie路径；服务器内部仍是根路径，Nginx剥离公共前缀并保留Host。生产凭据留在服务器，不放GitHub变量或源码。
 
 生产运行包由CI构建（dist + build-server + Linux生产依赖），ECS仅应用迁移和启动。Nginx代理至systemd单进程；上传位于persistent而非release。候选使用独立transient unit，停止整组后原子切换current，保留一个上一可用版本。代码回滚不回滚数据，迁移必须兼容上一版本；服务器root发布助手的实际安装状态独立于Git提交。具体路径、验收版本和维护命令见DEPLOYMENT.md。
+
+## 网页测试客户端（本地，未部署）
+
+App按/client分流，独立手机号会话不经过后台登录门禁。/api/client沿用同源保护，独立Cookie、固定测试验证码及8小时会话；不授予后台权限。共享配置allowAnyParticipant缺省false；服务端按hosts、guests、Person解析host/guest/audience，返回capabilities，写入时重新判定。
+
+MeetingRound以(meetingId,number)唯一；ClientSeat以(roundId,phone)唯一，多页共享席位与禁言；ClientVisit保存每段加入/退出及身份。主持导出最新结束轮次，后台可选历史轮次，旧Attendance演示数据不合并。历史直播首次访问建立startedAt=null兼容轮次。
+
+客户端事务更新Meeting.clientRevision取得行锁，不修改会议version/updatedAt；开始/结束仍校验version，结束及参会结算为同一事务。后台状态操作调用同一生命周期函数。数据库P2034写冲突返回409。轮询和执行器处理权限撤销、60秒心跳超时；超时离开记最后心跳。媒体行为仅为本地状态，审计标记simulatedMedia。

@@ -917,6 +917,15 @@ export function MeetingEditor() {
               />,
               true,
             )}
+            <Form.Item
+              name="allowAnyParticipant"
+              valuePropName="checked"
+              className="span-all"
+            >
+              <Checkbox>
+                测试客户端：允许任意手机号参会（关闭时仅限已配置人员）
+              </Checkbox>
+            </Form.Item>
             {participants("hosts", "主持")}
             {participants("guests", "嘉宾")}
             {network && (

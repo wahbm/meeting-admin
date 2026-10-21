@@ -35,6 +35,25 @@ const action = z.object({
   newStartTime: z.string().datetime().optional(),
 });
 const payloads: Record<string, any> = {
+  "post /api/client/auth/login": z.object({
+    phone: z.string().regex(/^1\d{10}$/),
+    code: z.literal("1234"),
+  }),
+  "post /api/client/meetings/{id}/action": z.object({
+    action: z.enum([
+      "start",
+      "end",
+      "join",
+      "leave",
+      "heartbeat",
+      "speak",
+      "stop",
+      "mute",
+      "unmute",
+    ]),
+    version: z.number().int().optional(),
+    targetId: z.number().int().optional(),
+  }),
   "post /api/auth/login": z.object({
     username: z.string(),
     password: z.string(),
@@ -146,14 +165,33 @@ export function openapi(routes: [string, string][]) {
           in: "query",
           schema: { type: "string" },
         });
+      if (p === "/api/meetings/{id}/attendance")
+        parameters.push(
+          {
+            name: "source",
+            in: "query",
+            schema: {
+              type: "string",
+              enum: ["client", "simulated"],
+              default: "client",
+            },
+          },
+          { name: "round", in: "query", schema: { type: "integer" } },
+        );
       const schema = payloads[`${method} ${p}`];
       paths[p][method] = {
         summary: p,
         tags: [p.split("/")[2]],
         parameters,
-        ...(["/api/auth/login", "/api/health"].includes(p)
+        ...([
+          "/api/auth/login",
+          "/api/client/auth/login",
+          "/api/health",
+        ].includes(p)
           ? { security: [] }
-          : {}),
+          : p.startsWith("/api/client/")
+            ? { security: [{ clientSession: [] }] }
+            : {}),
         ...(schema
           ? {
               requestBody: {
@@ -210,6 +248,11 @@ export function openapi(routes: [string, string][]) {
     servers: [{ url: normalizeBasePath(process.env.PUBLIC_BASE_PATH) }],
     components: {
       securitySchemes: {
+        clientSession: {
+          type: "apiKey",
+          in: "cookie",
+          name: (process.env.SESSION_COOKIE_NAME || "session") + "_client",
+        },
         session: {
           type: "apiKey",
           in: "cookie",

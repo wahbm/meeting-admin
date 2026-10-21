@@ -107,3 +107,18 @@ test("部署路径规范化和子路径资源地址", () => {
   assert.throws(() => normalizeBasePath("//evil.invalid/"));
   assert.throws(() => normalizeBasePath("/../"));
 });
+
+test("参会CSV保留引号换行并阻止公式注入", async () => {
+  const { encodeCSV } = await import("../shared/csv");
+  const csv = encodeCSV([
+    {
+      姓名: ' \t=HYPERLINK("https://invalid")',
+      备注: '引号"与\n换行',
+      手机号: "13800000001",
+    },
+  ]);
+  assert.ok(csv.startsWith('\ufeff"姓名"'));
+  assert.ok(csv.includes('"\' \t=HYPERLINK(""https://invalid"")"'));
+  assert.ok(csv.includes('"引号""与\n换行"'));
+  assert.ok(csv.includes('"13800000001"'));
+});

@@ -1,3 +1,4 @@
+import { registerClient, clientLifecycle, clientAttendance } from "./client";
 import { openapi } from "./openapi";
 import { normalizeBasePath } from "../shared/public-path";
 import Fastify from "fastify";
@@ -148,6 +149,16 @@ export async function createApp() {
           .map((i) => `${i.path.join(".")}: ${i.message}`)
           .join("；"),
       });
+    // Prisma 5 wraps MariaDB 12's ER_CHECKREAD (1020) as an unknown
+    // connector error; it still represents a retriable write conflict.
+    if (
+      (e as any).code === "P2034" ||
+      (e.name === "PrismaClientUnknownRequestError" &&
+        /MysqlError \{ code: 1020,/.test(e.message))
+    )
+      return reply
+        .code(409)
+        .send({ message: "数据正在被其他操作更新，请刷新后重试" });
     if ((e as any).code === "P2002")
       return reply.code(409).send({ message: "记录重复，请检查手机号或名称" });
     req.log.error(e);
@@ -162,7 +173,7 @@ export async function createApp() {
       const origin = new URL(r.headers.origin);
       if (origin.host !== r.headers.host) throw fail(403, "不允许跨站写入请求");
     }
-    if (r.url === "/api/auth/login") return;
+    if (r.url === "/api/auth/login" || r.url.startsWith("/api/client/")) return;
     const session =
       r.cookies[cookieName] &&
       (await db.session.findUnique({
@@ -189,6 +200,7 @@ export async function createApp() {
     )
       throw fail(403, "仅管理员可维护基础资料");
   });
+  await registerClient(app, cookieName);
   const attempts = new Map<string, { count: number; since: number }>();
   app.post("/api/auth/login", async (r, reply) => {
     const key = r.ip;
@@ -546,6 +558,7 @@ export async function createApp() {
         },
       });
       if (!updated.count) throw fail(409, "会议已更新，请刷新");
+      await clientLifecycle(tx, m.id, m.status, next.status);
       await tx.audit.create({
         data: {
           actor: (r as any).user.username,
@@ -576,20 +589,20 @@ export async function createApp() {
         时间: new Date(m.startTime).toLocaleString("zh-CN", {
           timeZone: "Asia/Shanghai",
         }),
-        网络参会: `${base}?kind=join`,
+        网络参会: `/client/meetings/${m.id}`,
         电话: "模拟电话：不拨号",
         参会口令: `DEMO-${m.id}-ATTEND`,
         主持口令: `DEMO-${m.id}-HOST`,
         主持: c.hosts.map((p: any) => p.name).join("、"),
         嘉宾: c.guests.map((p: any) => p.name).join("、"),
         监控: `${base}?kind=monitor`,
-        二维码内容: `${base}?kind=join`,
+        二维码内容: `/client/meetings/${m.id}`,
         ...(c.shareTypes.includes(21)
           ? { 报名地址: `${base}?kind=apply`, 代报名: `${base}?kind=proxy` }
           : {}),
       },
       control: {
-        组织者链接: `${base}?kind=control`,
+        组织者链接: `/client/meetings/${m.id}`,
         组织者口令: `DEMO-${m.id}-ORG`,
         参会口令: `DEMO-${m.id}-ATTEND`,
       },
@@ -1024,7 +1037,17 @@ export async function createApp() {
   });
   app.get("/api/meetings/:id/attendance", async (r) => {
     await meeting(r);
-    const q = r.query as any;
+    const q = z
+      .object({
+        source: z.enum(["client", "simulated"]).default("client"),
+        round: z.coerce.number().int().positive().optional(),
+        search: z.string().default(""),
+      })
+      .parse(r.query);
+    if (q.source === "client")
+      return db.$transaction((tx) =>
+        clientAttendance(tx, id(r), q.round, q.search),
+      );
     const rows = await db.attendance.findMany({
       where: {
         meetingId: id(r),
@@ -1168,6 +1191,12 @@ export async function createApp() {
 }
 const routes: [string, string][] = [
   ["/api/health", "get"],
+  ["/api/client/auth/login", "post"],
+  ["/api/client/auth/me", "get"],
+  ["/api/client/auth/logout", "post"],
+  ["/api/client/meetings/{id}", "get"],
+  ["/api/client/meetings/{id}/action", "post"],
+  ["/api/client/meetings/{id}/attendance", "get"],
   ["/api/auth/login", "post"],
   ["/api/auth/me", "get"],
   ["/api/auth/logout", "post"],

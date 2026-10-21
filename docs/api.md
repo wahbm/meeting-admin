@@ -4,7 +4,7 @@
 
 ## 通用约定
 
-- 除登录和GET /health外，全部接口要求会话Cookie（默认session，生产可配置专属名称）；登录成功通过Set-Cookie返回，会话8小时。
+- 除登录和GET /health外，全部接口要求对应会话Cookie；后台默认session，客户端使用后台Cookie名追加_client，均为8小时，不能互换。
 - 写操作要求同源Origin；无Origin的受信本地脚本仍必须提供有效Cookie。
 - viewer禁止写入；operator不能修改基础资料；内部审计不向viewer开放。
 - 成功HTTP200直接返回实体、数组或查询结果。错误`{message:string}`：400校验/状态条件、401会话、403权限、404不存在、409重复/引用/版本冲突、422研究所同步确认、413文件大小。
@@ -63,3 +63,24 @@ await api('/meetings/1', 'PATCH', {config, version:1});
 资料录制状态recordStatus：pending待提供、processing处理中、ready模拟可用、failed失败。模拟生成资料保存ready。结束会议仅把已标记ready且包含链接或内容的回放视为可用回放。
 
 GET /api/health为匿名数据库健康检查，成功返回{status:"ok"}，不可用返回HTTP503。子路径部署的Cookie名称、路径和OpenAPI servers由服务器配置，不能混用其他项目Cookie。
+
+## 测试客户端（2026-10-21）
+
+以下路径仍以/api为前缀。验证码固定1234，不发送短信。公开登录接口执行Origin检查、手机号格式校验和失败限流（IP维度10分钟20次）。Cookie使用PUBLIC_BASE_PATH、HttpOnly、SameSite=strict及COOKIE_SECURE。
+
+| 方法 | 路径 | 输入 / 返回 |
+|---|---|---|
+| POST | /client/auth/login | `{phone,code:"1234"}` → `{phone}`及独立Cookie |
+| GET / POST | /client/auth/me /client/auth/logout | 当前手机号 / 退出客户端 |
+| GET | /client/meetings/:id | 基础信息、计划/实际时间、轮次、me、capabilities、获准可见的当前人员 |
+| POST | /client/meetings/:id/action | `{action,version?,targetId?}` → 最新客户端会议视图 |
+| GET | /client/meetings/:id/attendance | 仅主持人且状态3/4可用；最新轮次汇总JSON，页面生成CSV |
+| GET | /meetings/:id/attendance | 后台会话；`source=client`默认，`source=simulated`查旧演示数据；客户端来源支持`round`正整数及`search` |
+
+动作：start/end要求主持人及当前会议version；join/leave/heartbeat适用于直播状态；speak/stop要求已加入，观众或被禁言者不能speak；mute/unmute要求主持人并提交本轮嘉宾ClientSeat.id作为targetId。禁言跨重进保留，新轮次重置。未加入人员不返回人员列表，主持人例外。列表手机号脱敏，导出包含完整手机号。
+
+身份顺序host > guest（预约嘉宾或名单role=1）> audience。allowAnyParticipant缺省false，开启仅放开测试准入，不执行既有混合观看授权。客户端不能访问后台接口。401会话失效；403准入或权限不足；409旧会议版本、数据库写冲突或心跳对应席位已退出。
+
+时间均ISO，历史startedAt可为空。汇总rows含round/name/phone/role/joinedAt/leftAt/minutes/source，身份取最后一次参会身份，分钟保留两位小数，source为“测试客户端参会”；rounds返回历史轮次时间。模拟来源沿用旧Attendance。CSV包含BOM并转义引号、换行及公式前缀。
+
+邀请接口的网络参会、二维码内容、会控组织者链接返回/client/meetings/:id，前端组合当前origin与公共前缀生成完整地址。电话、报名、监控、速记和演示口令仍为模拟，不授予客户端身份。
