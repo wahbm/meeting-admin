@@ -61,7 +61,7 @@ PUBLIC_BASE_PATH统一构建资源、前端路由、API、附件、二维码和C
 
 生产运行包由CI构建（dist + build-server + Linux生产依赖），ECS仅应用迁移和启动。Nginx代理至systemd单进程；上传位于persistent而非release。候选使用独立transient unit，停止整组后原子切换current，保留一个上一可用版本。代码回滚不回滚数据，迁移必须兼容上一版本；服务器root发布助手的实际安装状态独立于Git提交。具体路径、验收版本和维护命令见DEPLOYMENT.md。
 
-## 网页测试客户端（本地，未部署）
+## 网页测试客户端（2026-10-21，已上线）
 
 App按/client分流，独立手机号会话不经过后台登录门禁。/api/client沿用同源保护，独立Cookie、固定测试验证码及8小时会话；不授予后台权限。共享配置allowAnyParticipant缺省false；服务端按hosts、guests、Person解析host/guest/audience，返回capabilities，写入时重新判定。
 
