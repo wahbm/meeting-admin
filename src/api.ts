@@ -9,7 +9,9 @@ export async function api(url: string, method = "GET", body?: unknown) {
     method,
     credentials: "include",
     headers:
-      body instanceof FormData ? {} : { "Content-Type": "application/json" },
+      body === undefined || body instanceof FormData
+        ? {}
+        : { "Content-Type": "application/json" },
     body:
       body === undefined
         ? undefined

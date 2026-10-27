@@ -118,7 +118,7 @@ test("鉴权、过期、只读权限和运营资料权限", async () => {
     403,
   );
   assert.equal(
-    (await request("/auth/logout", "POST", {}, viewer)).statusCode,
+    (await request("/auth/logout", "POST", undefined, viewer)).statusCode,
     200,
   );
   assert.equal(
@@ -711,7 +711,7 @@ test("客户端登录隔离、固定验证码、同源保护、准入与真实�
   assert.equal(before.me.role, "host");
   const both = host + "; " + cookie;
   assert.equal(
-    (await request("/client/auth/logout", "POST", {}, both)).statusCode,
+    (await request("/client/auth/logout", "POST", undefined, both)).statusCode,
     200,
   );
   assert.equal(
