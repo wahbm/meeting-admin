@@ -1,10 +1,10 @@
 # 阿里云部署
 
-状态：2026-10-21，测试客户端已上线并完成本轮部署验收。业务缺项仍见TODO.md，部署成功不等于原始需求全部完成。
+状态：2026-10-27，退出登录修复已通过自动部署。业务缺项仍见TODO.md，部署成功不等于原始需求全部完成。
 
 - 地址：https://8.130.116.192/mosshqq/meeting-admin/（现有IP HTTPS，未配置新域名）
 - 仓库：https://github.com/wahbm/meeting-admin，公开；原始资料、凭据、数据库和上传文件不发布。
-- 当前运行代码：6f0e5d1619996e66008ed2d6e0e6cb79d94da947；成功发布：https://github.com/wahbm/meeting-admin/actions/runs/39519128016。
+- 当前运行代码：1f082741d7cf86391bcdfdd58d3c1fb43154650a；成功发布：https://github.com/wahbm/meeting-admin/actions/runs/40467709001。
 - 用户授权复用ECS、组织Secret访问及共享MariaDB迁移；明确不配置定期备份。
 
 ## 运行契约
@@ -54,3 +54,7 @@ sudo readlink -f /srv/meeting-admin/current
 ```
 
 不要输出环境文件或凭据排查问题。后续文档提交不改变上述运行版本；实际版本以current及成功Actions记录为准。
+
+## 2026-10-27 退出登录修复发布
+
+用户授权提交并部署，1f08274已推送main，Actions 40467709001状态Success。SQLite/MariaDB验证、前后端构建、运行包及Deploy verified release全部成功；该部署步骤包含服务器发布助手及公网HTTPS健康检查。本轮未单独执行线上浏览器退出验收；公共请求格式及退出会话失效由本地回归和双数据库CI覆盖。无数据库模型或发布助手变更。
